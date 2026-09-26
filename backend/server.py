@@ -26,6 +26,8 @@ PORT = int(os.getenv("SERVER_PORT", "8000"))
 
 app = FastAPI(title="LiveKit Voice Bot Token Server", version="1.0.0")
 
+import re
+
 # Allow frontend requests
 app.add_middleware(
     CORSMiddleware,
@@ -34,6 +36,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def normalize_slashes(request, call_next):
+    """Normalize duplicate slashes (e.g. //api/health -> /api/health)."""
+    if "//" in request.scope.get("path", ""):
+        request.scope["path"] = re.sub(r"/+", "/", request.scope["path"])
+    return await call_next(request)
 
 
 class TokenRequest(BaseModel):

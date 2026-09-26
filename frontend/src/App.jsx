@@ -14,10 +14,10 @@ import {
   Key,
   ShieldCheck,
   ChevronDown,
-  ChevronUp,
 } from './icons';
 
-const BACKEND_API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+// Automatically strip trailing slashes to prevent double slashes like '//api/health'
+const BACKEND_API_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 export default function App() {
   const [token, setToken] = useState('');

@@ -16,7 +16,8 @@ import {
   Globe,
 } from '../icons';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+// Automatically strip trailing slashes to prevent double slashes
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
 const ACCENT_VOICE_OPTIONS = [
   {
