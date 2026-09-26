@@ -143,7 +143,15 @@ class VoiceAssistant(Agent):
             )
 
 
-server = AgentServer()
+# Configure AgentServer optimized for cloud container environments (Render/Koyeb):
+# - num_idle_processes=1: keeps RAM usage low (<300MB) on 512MB free tier containers
+# - load_threshold=0.99: prevents premature "worker full capacity" warnings during boot
+# - port=0: prevents LiveKit internal server from binding port 8081 and hijacking Render HTTP traffic
+server = AgentServer(
+    num_idle_processes=1,
+    load_threshold=0.99,
+    port=0,
+)
 
 
 @server.rtc_session(agent_name=os.getenv("LIVEKIT_AGENT_NAME", "indian-voice-agent"))

@@ -41,6 +41,13 @@ class TokenRequest(BaseModel):
     agent_name: Optional[str] = ""
 
 
+@app.get("/")
+@app.get("/health")
+async def root_health():
+    """Root health check for cloud deployment platforms (Render, Koyeb, Railway)."""
+    return {"status": "ok", "service": "livekit-voice-bot", "timestamp": int(time.time())}
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check and configuration diagnostics."""
@@ -51,7 +58,7 @@ async def health_check():
         and LIVEKIT_API_KEY != "your_livekit_api_key"
     )
     is_deepgram_configured = bool(DEEPGRAM_API_KEY) and DEEPGRAM_API_KEY != "your_deepgram_api_key"
-    is_gemini_configured = bool(GEMINI_API_KEY) and GEMINI_API_KEY != "your_gemini_api_key"
+    is_llm_configured = bool(os.getenv("GROQ_API_KEY")) or (bool(GEMINI_API_KEY) and GEMINI_API_KEY != "your_gemini_api_key")
 
     return {
         "status": "online",
@@ -59,12 +66,12 @@ async def health_check():
         "configurations": {
             "livekit": is_livekit_configured,
             "deepgram": is_deepgram_configured,
-            "gemini": is_gemini_configured,
+            "llm": is_llm_configured,
         },
         "message": (
             "All credentials configured!"
-            if (is_livekit_configured and is_deepgram_configured and is_gemini_configured)
-            else "Missing or default credentials detected in backend/.env"
+            if (is_livekit_configured and is_deepgram_configured and is_llm_configured)
+            else "Missing or default credentials detected in environment"
         ),
     }
 
@@ -265,5 +272,5 @@ async def get_preview_audio(clean_name: str):
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info(f"Starting LiveKit token server on port {PORT}...")
-    uvicorn.run("server:app", host="0.0.0.0", port=PORT, reload=True)
+    is_dev = os.getenv("DEV", "false").lower() == "true"
+    uvicorn.run("server:app", host="0.0.0.0", port=PORT, reload=is_dev)
