@@ -17,13 +17,19 @@ SERVER_PID=$!
 # Wait a second for token server to initialize
 sleep 2
 
-# Start LiveKit Agent Worker in production mode ('start')
+# Start LiveKit Agent Worker with auto-reconnect supervisor
 echo "🤖 Starting LiveKit Agent Worker..."
-python agent.py start &
+(
+    while true; do
+        python agent.py start || true
+        echo "Agent worker stopped, restarting in 3s..."
+        sleep 3
+    done
+) &
 AGENT_PID=$!
 
-# Trap signals and terminate both child processes cleanly
+# Trap signals and terminate cleanly
 trap "echo 'Shutting down services...'; kill -TERM $SERVER_PID $AGENT_PID 2>/dev/null; wait" SIGINT SIGTERM EXIT
 
-# Wait on both processes
-wait -n $SERVER_PID $AGENT_PID
+# Keep running as long as the primary FastAPI token server is alive
+wait $SERVER_PID

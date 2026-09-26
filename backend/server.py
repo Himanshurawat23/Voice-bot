@@ -52,14 +52,14 @@ class TokenRequest(BaseModel):
     agent_name: Optional[str] = ""
 
 
-@app.get("/")
-@app.get("/health")
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def root_health():
     """Root health check for cloud deployment platforms (Render, Koyeb, Railway)."""
     return {"status": "ok", "service": "livekit-voice-bot", "timestamp": int(time.time())}
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health_check():
     """Health check and configuration diagnostics."""
     is_livekit_configured = (

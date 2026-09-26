@@ -32,6 +32,7 @@ from livekit.agents import (
     cli,
     room_io,
 )
+from livekit.agents.worker import JobExecutorType
 from livekit.agents.llm import ChatChunk
 from livekit.agents.llm import ChatContext, Tool
 from livekit.agents.llm import ChatMessage
@@ -144,12 +145,15 @@ class VoiceAssistant(Agent):
 
 
 # Configure AgentServer optimized for cloud container environments (Render/Koyeb):
-# - num_idle_processes=1: keeps RAM usage low (<300MB) on 512MB free tier containers
-# - load_threshold=0.99: prevents premature "worker full capacity" warnings during boot
-# - port=0: prevents LiveKit internal server from binding port 8081 and hijacking Render HTTP traffic
+# - job_executor_type=THREAD: uses lightweight threads instead of heavy child processes, saving ~300MB RAM
+# - num_idle_processes=0: no idle processes to spawn or time out
+# - host="127.0.0.1": keeps LiveKit internal server strictly on localhost so Render won't route public traffic to it
+# - load_threshold=1.0: prevents worker from marking itself unavailable under brief CPU spikes
 server = AgentServer(
-    num_idle_processes=1,
-    load_threshold=0.99,
+    job_executor_type=JobExecutorType.THREAD,
+    num_idle_processes=0,
+    load_threshold=1.0,
+    host="127.0.0.1",
     port=0,
 )
 
