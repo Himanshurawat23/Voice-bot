@@ -178,12 +178,13 @@ server = AgentServer(
 async def voice_agent_session(ctx: JobContext):
     logger.info(f"Starting voice agent session for room '{ctx.room.name}'...")
 
-    # Noise-resilient VAD: higher activation threshold and min speech duration
-    # filter out breathing, keyboard clicks, and background room noise
+    # Noise-resilient VAD:
+    # - activation_threshold=0.7: requires intentional vocal energy (ignores ambient murmur, fans, AC)
+    # - min_speech_duration=0.35: ignores short sounds under 350ms (throat clears, sighs, breaths, mic pops)
     vad = silero.VAD.load(
-        activation_threshold=0.6,    # Default 0.5; 0.6 requires clearer speech and ignores room noise
-        min_speech_duration=0.1,     # Ignore short clicks/taps under 100ms
-        min_silence_duration=0.45,   # Clean end-of-turn detection
+        activation_threshold=0.7,
+        min_speech_duration=0.35,
+        min_silence_duration=0.5,
     )
     stt = deepgram.STT(
         model=STT_MODEL,

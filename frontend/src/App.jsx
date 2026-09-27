@@ -186,6 +186,14 @@ export default function App() {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
+            channelCount: 1,
+            // Enhanced noise suppression and audio filtering
+            voiceIsolation: true,
+            googEchoCancellation: true,
+            googAutoGainControl: true,
+            googNoiseSuppression: true,
+            googHighpassFilter: true, // Filters out mic pops, breathing, low-end rumbles
+            googTypingNoiseDetection: true, // Filters keyboard clicks
           }}
           video={false}
           onDisconnected={handleDisconnect}
