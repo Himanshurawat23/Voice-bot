@@ -248,6 +248,36 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           p.identity?.toLowerCase().includes('moshi'))
     );
 
+  // Manual interrupt / stop bot speaking
+  const handleInterrupt = async () => {
+    try {
+      // 1. Immediately clear any in-progress streaming message on UI
+      setStreamingMessage(null);
+
+      // 2. Publish interrupt command to backend agent over WebRTC
+      if (room?.localParticipant) {
+        const payload = JSON.stringify({ action: 'interrupt', timestamp: Date.now() });
+        await room.localParticipant.publishData(new TextEncoder().encode(payload), {
+          topic: 'lk-control',
+          reliable: true,
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to send interrupt command:', err);
+    }
+  };
+
+  // Keyboard shortcut: Escape key stops bot when speaking
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isBotSpeaking) {
+        handleInterrupt();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isBotSpeaking]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '20px 32px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>
       {/* LiveKit built-in audio player for agent tracks */}
@@ -348,6 +378,7 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
             state={agentState || (hasAgentConnected ? 'idle' : 'connecting')}
             isBotSpeaking={isBotSpeaking}
             isUserSpeaking={isUserSpeaking}
+            onInterrupt={handleInterrupt}
           />
         </div>
 
@@ -366,6 +397,8 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           onToggleMute={toggleMute}
           onDisconnect={onDisconnect}
           isSpeaking={isUserSpeaking}
+          isBotSpeaking={isBotSpeaking}
+          onInterrupt={handleInterrupt}
         />
       </div>
     </div>

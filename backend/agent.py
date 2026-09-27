@@ -339,6 +339,27 @@ async def voice_agent_session(ctx: JobContext):
     await ctx.connect()
     logger.info(f"Agent successfully joined room '{ctx.room.name}' (identity: {ctx.room.local_participant.identity})!")
 
+    # Listen for control commands from the frontend (e.g. manual "Stop Speaking" button)
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        try:
+            payload = json.loads(data_packet.data.decode("utf-8"))
+            if payload.get("action") == "interrupt":
+                logger.info("🛑 [Manual Interruption] User clicked stop speaking! Halting speech...")
+                # Force-interrupt current speech generation and audio playback
+                asyncio.create_task(session.interrupt(force=True))
+
+                # Notify frontend to clear any pending streaming text
+                now_ts = int(time.time() * 1000)
+                asyncio.create_task(
+                    ctx.room.local_participant.publish_data(
+                        json.dumps({"type": "stream_end", "interrupted": True, "timestamp": now_ts}).encode(),
+                        topic="lk-agent-stream",
+                    )
+                )
+        except Exception as err:
+            logger.debug(f"Error handling room data packet: {err}")
+
     # Deterministic single-agent leader election:
     # If multiple agent dispatch jobs were triggered for the same room, ensure ONLY ONE
     # agent session survives and speaks. All other duplicates cleanly disconnect.

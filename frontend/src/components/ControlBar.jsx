@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, MicOff, PhoneOff, Sparkles } from '../icons';
+import { Mic, MicOff, PhoneOff, Sparkles, Square } from '../icons';
 
 export function ControlBar({
   isMuted = false,
@@ -7,6 +7,8 @@ export function ControlBar({
   onDisconnect,
   connectionState = 'connected',
   isSpeaking = false,
+  isBotSpeaking = false,
+  onInterrupt,
 }) {
   return (
     <div className="control-dock">
@@ -22,6 +24,18 @@ export function ControlBar({
           <Mic size={19} color="#ffffff" strokeWidth={1.8} />
         )}
       </button>
+
+      {/* Stop Speaking / Interrupt Button (Appears when Bot is Talking) */}
+      {isBotSpeaking && onInterrupt && (
+        <button
+          onClick={onInterrupt}
+          className="dock-btn stop-speaking"
+          title="Stop bot speaking (or press Esc)"
+        >
+          <Square size={15} fill="currentColor" color="#f87171" strokeWidth={1.8} />
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f87171' }}>Stop</span>
+        </button>
+      )}
 
       {/* Voice Status Pill / Indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 14px', borderRadius: '9999px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-subtle)' }}>

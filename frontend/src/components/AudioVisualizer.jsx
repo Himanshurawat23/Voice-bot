@@ -1,7 +1,12 @@
 import React from 'react';
-import { Volume2, Mic, Sparkles, Radio } from '../icons';
+import { Volume2, Mic, Sparkles, Radio, Square } from '../icons';
 
-export function AudioVisualizer({ state = 'idle', isBotSpeaking = false, isUserSpeaking = false }) {
+export function AudioVisualizer({
+  state = 'idle',
+  isBotSpeaking = false,
+  isUserSpeaking = false,
+  onInterrupt,
+}) {
   // Determine dominant state for visualizer
   let activeState = 'idle';
   let stateLabel = 'Ready';
@@ -74,6 +79,18 @@ export function AudioVisualizer({ state = 'idle', isBotSpeaking = false, isUserS
           );
         })}
       </div>
+
+      {/* Interactive Stop Button under the visualizer */}
+      {(activeState === 'speaking' || isBotSpeaking) && onInterrupt && (
+        <button
+          onClick={onInterrupt}
+          className="interrupt-chip-btn"
+          title="Stop the bot and speak (or press Esc)"
+        >
+          <Square size={13} fill="currentColor" color="#f87171" strokeWidth={1.8} />
+          <span>Stop speaking</span>
+        </button>
+      )}
     </div>
   );
 }
