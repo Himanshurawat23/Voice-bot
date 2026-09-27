@@ -253,20 +253,30 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
     try {
       console.log('🛑 [Manual Interrupt] Stopping bot speech immediately...');
 
-      // 1. Instantly silence and pause all audio elements in browser (zero-latency cutoff)
+      // 1. Temporarily mute and pause the current playback to silence it immediately
       document.querySelectorAll('audio').forEach((audio) => {
         try {
+          audio.muted = true;
           audio.pause();
-          audio.currentTime = 0;
         } catch (e) {
-          console.debug('Audio element stop error:', e);
+          console.debug('Audio element mute error:', e);
         }
       });
 
       // 2. Clear any in-progress streaming message bubble on UI
       setStreamingMessage(null);
 
-      // 3. Publish interrupt command to backend agent over WebRTC
+      // 3. Immediately re-arm the audio element so the NEXT response plays voice normally
+      setTimeout(() => {
+        document.querySelectorAll('audio').forEach((audio) => {
+          try {
+            audio.muted = false;
+            audio.play().catch((e) => console.debug('Audio re-arm error:', e));
+          } catch (e) {}
+        });
+      }, 300);
+
+      // 4. Publish interrupt command to backend agent over WebRTC
       if (room?.localParticipant) {
         const payload = JSON.stringify({ action: 'interrupt', timestamp: Date.now() });
         const encoded = new TextEncoder().encode(payload);
@@ -278,6 +288,20 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
       console.warn('Failed to send interrupt command:', err);
     }
   };
+
+  // Ensure browser audio is always unmuted and playing whenever the bot speaks
+  useEffect(() => {
+    if (isBotSpeaking) {
+      document.querySelectorAll('audio').forEach((audio) => {
+        try {
+          audio.muted = false;
+          if (audio.paused) {
+            audio.play().catch((err) => console.debug('Audio auto-resume error:', err));
+          }
+        } catch (e) {}
+      });
+    }
+  }, [isBotSpeaking]);
 
   // Keyboard shortcut: Escape key stops bot immediately
   useEffect(() => {
