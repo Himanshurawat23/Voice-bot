@@ -25,15 +25,30 @@ export function ControlBar({
         )}
       </button>
 
-      {/* Stop Speaking / Interrupt Button (Appears when Bot is Talking) */}
-      {isBotSpeaking && onInterrupt && (
+      {/* Stop Speaking / Interrupt Button */}
+      {onInterrupt && (
         <button
           onClick={onInterrupt}
-          className="dock-btn stop-speaking"
-          title="Stop bot speaking (or press Esc)"
+          className={`dock-btn ${isBotSpeaking ? 'stop-speaking' : ''}`}
+          title={isBotSpeaking ? "Stop bot speaking (or press Esc)" : "Stop / interrupt bot audio"}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+            padding: '0 16px',
+            borderRadius: '9999px',
+            background: isBotSpeaking ? 'rgba(244, 63, 94, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+            border: isBotSpeaking ? '1px solid rgba(244, 63, 94, 0.5)' : '1px solid var(--border-subtle)',
+            color: isBotSpeaking ? '#fda4af' : 'var(--text-muted)',
+            cursor: 'pointer',
+            height: '44px',
+            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
         >
-          <Square size={15} fill="currentColor" color="#f87171" strokeWidth={1.8} />
-          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f87171' }}>Stop</span>
+          <Square size={14} fill={isBotSpeaking ? '#f43f5e' : 'none'} color={isBotSpeaking ? '#f43f5e' : 'currentColor'} strokeWidth={1.8} />
+          <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+            {isBotSpeaking ? 'Stop Bot' : 'Stop'}
+          </span>
         </button>
       )}
 

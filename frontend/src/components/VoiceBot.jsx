@@ -248,35 +248,47 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           p.identity?.toLowerCase().includes('moshi'))
     );
 
-  // Manual interrupt / stop bot speaking
+  // Manual interrupt / stop bot speaking immediately
   const handleInterrupt = async () => {
     try {
-      // 1. Immediately clear any in-progress streaming message on UI
+      console.log('🛑 [Manual Interrupt] Stopping bot speech immediately...');
+
+      // 1. Instantly silence and pause all audio elements in browser (zero-latency cutoff)
+      document.querySelectorAll('audio').forEach((audio) => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch (e) {
+          console.debug('Audio element stop error:', e);
+        }
+      });
+
+      // 2. Clear any in-progress streaming message bubble on UI
       setStreamingMessage(null);
 
-      // 2. Publish interrupt command to backend agent over WebRTC
+      // 3. Publish interrupt command to backend agent over WebRTC
       if (room?.localParticipant) {
         const payload = JSON.stringify({ action: 'interrupt', timestamp: Date.now() });
-        await room.localParticipant.publishData(new TextEncoder().encode(payload), {
-          topic: 'lk-control',
-          reliable: true,
-        });
+        const encoded = new TextEncoder().encode(payload);
+        // Send on topics to ensure backend receives it
+        await room.localParticipant.publishData(encoded, { topic: 'lk-control', reliable: true });
+        await room.localParticipant.publishData(encoded, { topic: 'lk-agent-control', reliable: true });
       }
     } catch (err) {
       console.warn('Failed to send interrupt command:', err);
     }
   };
 
-  // Keyboard shortcut: Escape key stops bot when speaking
+  // Keyboard shortcut: Escape key stops bot immediately
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && isBotSpeaking) {
+      if (e.key === 'Escape') {
         handleInterrupt();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isBotSpeaking]);
+  }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '20px 32px', maxWidth: '1440px', margin: '0 auto', width: '100%' }}>

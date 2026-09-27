@@ -220,8 +220,8 @@ async def voice_agent_session(ctx: JobContext):
         tts=tts,
         turn_handling=agent_session.TurnHandlingOptions(
             interruption=agent_session.InterruptionOptions(
-                min_duration=0.5,
-                min_words=2,
+                min_duration=0.3,
+                min_words=1,
                 resume_false_interruption=True,
             )
         ),
@@ -345,11 +345,14 @@ async def voice_agent_session(ctx: JobContext):
         try:
             payload = json.loads(data_packet.data.decode("utf-8"))
             if payload.get("action") == "interrupt":
-                logger.info("🛑 [Manual Interruption] User clicked stop speaking! Halting speech...")
-                # Force-interrupt current speech generation and audio playback
-                asyncio.create_task(session.interrupt(force=True))
+                logger.info("🛑 [Manual Interruption] User clicked stop speaking! Halting speech immediately...")
+                # Interrupt current speech and audio queue (session.interrupt is synchronous returning Future)
+                try:
+                    session.interrupt(force=True)
+                except Exception as int_err:
+                    logger.warning(f"session.interrupt call warning: {int_err}")
 
-                # Notify frontend to clear any pending streaming text
+                # Notify frontend to clear streaming text
                 now_ts = int(time.time() * 1000)
                 asyncio.create_task(
                     ctx.room.local_participant.publish_data(
@@ -358,7 +361,7 @@ async def voice_agent_session(ctx: JobContext):
                     )
                 )
         except Exception as err:
-            logger.debug(f"Error handling room data packet: {err}")
+            logger.warning(f"Error handling room data packet: {err}")
 
     # Deterministic single-agent leader election:
     # If multiple agent dispatch jobs were triggered for the same room, ensure ONLY ONE
