@@ -52,6 +52,8 @@ STT_LANGUAGE = os.getenv("DEEPGRAM_STT_LANGUAGE", "en-IN")
 TTS_MODEL = os.getenv("DEEPGRAM_TTS_MODEL", "en-IN-PrabhatNeural")
 LLM_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
+MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "100"))
+MAX_CHAT_HISTORY = int(os.getenv("MAX_CHAT_HISTORY", "6"))
 
 
 from typing import AsyncIterable, Union, Optional
@@ -64,7 +66,8 @@ class VoiceAssistant(Agent):
             "You are an engaging, articulate, and friendly AI voice assistant with a natural Indian conversational style. "
             "You converse with the user in real time over WebRTC voice audio and text chat. "
             "You effortlessly understand Indian English, Indian accents, and common Hindi/Hinglish phrasing. "
-            "Keep your answers concise (1 to 2 sentences maximum) unless asked for more detail. "
+            "Keep your answers short, crisp, and conversational (1 to 2 sentences maximum, under 25 words) unless asked for more detail. "
+            "Never use fluff, filler intros like 'Certainly, I would be happy to help', or long repetitive explanations. "
             "Speak naturally and warmly as if talking on a phone call. "
             "Do not use markdown formatting, bullet points, asterisks, or code blocks in your output."
         )
@@ -77,7 +80,20 @@ class VoiceAssistant(Agent):
         tools: list[Tool],
         model_settings: ModelSettings,
     ) -> AsyncIterable[Union[ChatChunk, str]]:
-        """Override llm_node to stream LLM chunks to the frontend chat in real time."""
+        """Override llm_node with token-saving context truncation and live streaming."""
+        # 1. Token Saver: Sliding window truncation prevents context snowballing over long calls
+        # Keeps system prompt + only the last N messages
+        chat_ctx.truncate(max_items=MAX_CHAT_HISTORY)
+
+        # 2. Token Saver: Skip LLM call on accidental microphone noise / filler sounds
+        last_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
+        if last_msg and last_msg.role == "user":
+            user_text = (last_msg.content if isinstance(last_msg.content, str) else "").strip().lower()
+            # Ignore isolated filler sounds, throat clears, or single character mic taps
+            if user_text in {"uh", "um", "ah", "hmm", "er", "mm"} or len(user_text) <= 1:
+                logger.info(f"⚡ [Token Saver] Ignored filler/mic noise: '{user_text}' (0 tokens burned)")
+                return
+
         stream_id = uuid.uuid4().hex[:12]
 
         # Signal stream start to the frontend
@@ -181,6 +197,7 @@ async def voice_agent_session(ctx: JobContext):
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY,
         temperature=TEMPERATURE,
+        extra_body={"max_tokens": MAX_TOKENS},  # Hard cap completion tokens to prevent verbose burn
     )
     from edge_tts_adapter import EdgeTTS
 
