@@ -86,11 +86,12 @@ class VoiceAssistant(Agent):
         chat_ctx.truncate(max_items=MAX_CHAT_HISTORY)
 
         # 2. Token Saver: Skip LLM call on accidental microphone noise / filler sounds
-        last_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
-        if last_msg and last_msg.role == "user":
-            user_text = (last_msg.content if isinstance(last_msg.content, str) else "").strip().lower()
-            # Ignore isolated filler sounds, throat clears, or single character mic taps
-            if user_text in {"uh", "um", "ah", "hmm", "er", "mm"} or len(user_text) <= 1:
+        msgs = chat_ctx.messages() if callable(getattr(chat_ctx, "messages", None)) else getattr(chat_ctx, "items", [])
+        last_msg = msgs[-1] if msgs else None
+        if last_msg and getattr(last_msg, "role", None) == "user":
+            user_text = (getattr(last_msg, "text_content", "") or "").strip().lower()
+            # Ignore isolated filler sounds or single character mic taps
+            if user_text in {"uh", "um", "ah", "hmm", "er", "mm"} or (len(user_text) <= 1 and user_text != "?"):
                 logger.info(f"⚡ [Token Saver] Ignored filler/mic noise: '{user_text}' (0 tokens burned)")
                 return
 
