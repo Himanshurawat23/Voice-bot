@@ -22,6 +22,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("livekit-agent")
 
+# Increase loop watchdog threshold (default 100ms causes noisy false warnings on shared cloud CPUs like Render)
+os.environ.setdefault("LIVEKIT_AGENTS_LOOP_BLOCK_WARN_MS", "500")
+
 from livekit import rtc
 from livekit.agents import (
     Agent,

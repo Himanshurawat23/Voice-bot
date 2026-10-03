@@ -8,6 +8,7 @@ echo "=========================================================="
 PORT=${PORT:-8000}
 SERVER_PORT=${SERVER_PORT:-$PORT}
 export SERVER_PORT
+export LIVEKIT_AGENTS_LOOP_BLOCK_WARN_MS=${LIVEKIT_AGENTS_LOOP_BLOCK_WARN_MS:-500}
 
 # Start FastAPI Token Server in the background
 echo "🚀 Starting FastAPI Token Server on port $SERVER_PORT..."
