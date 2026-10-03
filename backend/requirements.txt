@@ -13,6 +13,8 @@ edge-tts>=6.1.0
 aiohttp>=3.9.0
 numpy>=1.24.0
 livekit-plugins-noise-cancellation>=0.3.0
+soundfile>=0.12.1
+requests>=2.31.0
 
 # Optional PocketTTS (CPU-only voice cloning, 100M params):
 pocket-tts>=0.1.0

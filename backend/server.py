@@ -224,63 +224,65 @@ async def calibrate_voice(
         if not raw_audio_bytes or len(raw_audio_bytes) < 1000:
             raise HTTPException(status_code=400, detail="Audio file too short or empty.")
 
-        # 1. Convert to 16kHz mono WAV via PyAV
-        wav_bytes = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes)
+        def _do_calibration():
+            # 1. Convert to 16kHz mono WAV via PyAV
+            wav_bytes = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes)
 
-        # 2. Extract acoustic metrics
-        acoustics = voice_profile_manager.analyze_audio_acoustics(wav_bytes)
+            # 2. Extract acoustic metrics
+            acoustics = voice_profile_manager.analyze_audio_acoustics(wav_bytes)
 
-        # 3. Transcribe speech via Deepgram STT (with word timestamps)
-        transcript, words = voice_profile_manager.transcribe_audio_with_words(wav_bytes)
-        if not transcript:
-            transcript = "Hello! I am calibrating my voice, tone, and speaking style for our conversation."
+            # 3. Transcribe speech via Deepgram STT (with word timestamps)
+            transcript, words = voice_profile_manager.transcribe_audio_with_words(wav_bytes)
+            if not transcript:
+                transcript = "Hello! I am calibrating my voice, tone, and speaking style for our conversation."
 
-        # 4. Generate linguistic profile & mirror prompt via Groq
-        profile_data = voice_profile_manager.generate_voice_profile(
-            transcript=transcript,
-            acoustics=acoustics,
-            participant_name=participant_name,
-            preferred_accent=preferred_accent,
-            preferred_voice=preferred_voice,
-        )
-        profile_data["transcript"] = transcript
-        profile_data["acoustics"] = acoustics
+            # 4. Generate linguistic profile & mirror prompt via Groq
+            profile_data = voice_profile_manager.generate_voice_profile(
+                transcript=transcript,
+                acoustics=acoustics,
+                participant_name=participant_name,
+                preferred_accent=preferred_accent,
+                preferred_voice=preferred_voice,
+            )
+            profile_data["transcript"] = transcript
+            profile_data["acoustics"] = acoustics
 
-        # 4b. Prepare 24kHz WAV and extract optimal aligned reference clip for F5-TTS
-        wav_24k_raw = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes, target_sample_rate=24000)
-        aligned_24k_bytes, aligned_ref_text = voice_profile_manager.extract_aligned_reference_clip(
-            wav_24k_raw, words, transcript
-        )
-        profile_data["ref_text"] = aligned_ref_text
+            # 4b. Prepare 24kHz WAV and extract optimal aligned reference clip for F5-TTS / PocketTTS
+            wav_24k_raw = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes, target_sample_rate=24000)
+            aligned_24k_bytes, aligned_ref_text = voice_profile_manager.extract_aligned_reference_clip(
+                wav_24k_raw, words, transcript
+            )
+            profile_data["ref_text"] = aligned_ref_text
 
-        # 5. Synthesize a preview greeting in the mirrored persona & matched voice
-        preview_text = profile_data.get(
-            "preview_greeting",
-            f"Hey {participant_name}! I've calibrated to your voice and tone. Let's chat!"
-        )
-        recommended_voice = profile_data.get("recommended_voice", "f5-tts")
+            # 5. Synthesize a preview greeting in the mirrored persona & matched voice
+            preview_text = profile_data.get(
+                "preview_greeting",
+                f"Hey {participant_name}! I've calibrated to your voice and tone. Let's chat!"
+            )
+            recommended_voice = profile_data.get("recommended_voice", "f5-tts")
 
-        # Create temporary 24k wav reference for preview synthesis if needed
-        clean_name = "".join(c for c in participant_name if c.isalnum() or c in ("-", "_")).lower() or "user-default"
-        temp_24k_path = voice_profile_manager.PROFILES_DIR / f"{clean_name}_ref_24k.wav"
-        temp_24k_path.write_bytes(aligned_24k_bytes)
+            # Create temporary 24k wav reference for preview synthesis if needed
+            clean_name = "".join(c for c in participant_name if c.isalnum() or c in ("-", "_")).lower() or "user-default"
+            temp_24k_path = voice_profile_manager.PROFILES_DIR / f"{clean_name}_ref_24k.wav"
+            temp_24k_path.write_bytes(aligned_24k_bytes)
 
-        preview_bytes = voice_profile_manager.synthesize_preview_speech(
-            preview_text,
-            recommended_voice,
-            ref_audio_path=str(temp_24k_path),
-            ref_text=aligned_ref_text,
-        )
+            preview_bytes = voice_profile_manager.synthesize_preview_speech(
+                preview_text,
+                recommended_voice,
+                ref_audio_path=str(temp_24k_path),
+                ref_text=aligned_ref_text,
+            )
 
-        # 6. Save reference WAV and profile JSON
-        saved_profile = voice_profile_manager.save_voice_profile(
-            participant_name=participant_name,
-            profile_data=profile_data,
-            wav_bytes=wav_bytes,
-            preview_bytes=preview_bytes,
-            wav_24k_bytes=aligned_24k_bytes,
-        )
+            # 6. Save reference WAV and profile JSON
+            return voice_profile_manager.save_voice_profile(
+                participant_name=participant_name,
+                profile_data=profile_data,
+                wav_bytes=wav_bytes,
+                preview_bytes=preview_bytes,
+                wav_24k_bytes=aligned_24k_bytes,
+            )
 
+        saved_profile = await asyncio.to_thread(_do_calibration)
         return saved_profile
     except HTTPException:
         raise

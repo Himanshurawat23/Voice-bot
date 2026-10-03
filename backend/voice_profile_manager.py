@@ -180,20 +180,43 @@ def extract_aligned_reference_clip(
     ref_text = " ".join(w.get("punctuated_word", w.get("word", "")) for w in words[:cand_idx + 1]).strip()
 
     # Slice the 24kHz audio bytes up to cut_time
+    # Primary: Python standard library 'wave' (zero dependencies, 100% reliable in all environments)
     try:
-        import soundfile as sf
+        import wave
         in_buf = io.BytesIO(wav_24k_bytes)
-        audio_data, sr = sf.read(in_buf)
-        max_samples = int(cut_time * sr)
-        cut_audio = audio_data[:max_samples]
+        with wave.open(in_buf, "rb") as r:
+            nchannels = r.getnchannels()
+            sampwidth = r.getsampwidth()
+            framerate = r.getframerate()
+            num_frames = min(r.getnframes(), int(cut_time * framerate))
+            frames = r.readframes(num_frames)
+
         out_buf = io.BytesIO()
-        sf.write(out_buf, cut_audio, sr, format="wav")
+        with wave.open(out_buf, "wb") as w:
+            w.setnchannels(nchannels)
+            w.setsampwidth(sampwidth)
+            w.setframerate(framerate)
+            w.writeframes(frames)
+
         sliced_wav_bytes = out_buf.getvalue()
         logger.info(f"✂️ Aligned reference clip: {cut_time:.2f}s ({cand_idx+1} words) | '{ref_text}'")
         return sliced_wav_bytes, ref_text
-    except Exception as e:
-        logger.warning(f"Failed to slice audio for reference clip: {e}")
-        return wav_24k_bytes, full_transcript
+    except Exception as wave_err:
+        logger.debug(f"Standard wave slice exception ({wave_err}), trying soundfile fallback...")
+        try:
+            import soundfile as sf
+            in_buf = io.BytesIO(wav_24k_bytes)
+            audio_data, sr = sf.read(in_buf)
+            max_samples = int(cut_time * sr)
+            cut_audio = audio_data[:max_samples]
+            out_buf = io.BytesIO()
+            sf.write(out_buf, cut_audio, sr, format="wav")
+            sliced_wav_bytes = out_buf.getvalue()
+            logger.info(f"✂️ Aligned reference clip (soundfile): {cut_time:.2f}s ({cand_idx+1} words) | '{ref_text}'")
+            return sliced_wav_bytes, ref_text
+        except Exception as sf_err:
+            logger.warning(f"Failed to slice audio for reference clip: {sf_err}")
+            return wav_24k_bytes, full_transcript
 
 
 async def _edge_tts_synth(text: str, voice: str) -> bytes:
