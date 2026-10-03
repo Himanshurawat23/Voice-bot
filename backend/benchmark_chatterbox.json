@@ -1,0 +1,167 @@
+[
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Hello, how are you doing today?",
+    "run": 1,
+    "load_time_s": 9.450696874999267,
+    "ttfc_ms": 7361.800791999485,
+    "total_time_ms": 7361.800791999485,
+    "audio_duration_s": 2.0,
+    "rtf": 3.6809003959997426,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Hello, how are you doing today?",
+    "run": 2,
+    "load_time_s": 9.226175167001202,
+    "ttfc_ms": 6564.375374999145,
+    "total_time_ms": 6564.375374999145,
+    "audio_duration_s": 1.72,
+    "rtf": 3.8164973110460143,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Hello, how are you doing today?",
+    "run": 3,
+    "load_time_s": 8.54516120900007,
+    "ttfc_ms": 6801.724375000049,
+    "total_time_ms": 6801.724375000049,
+    "audio_duration_s": 1.72,
+    "rtf": 3.954490915697703,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "The quick brown fox jumps over the lazy dog.",
+    "run": 1,
+    "load_time_s": 8.919405500000721,
+    "ttfc_ms": 10063.655416999609,
+    "total_time_ms": 10063.655416999609,
+    "audio_duration_s": 2.48,
+    "rtf": 4.05792557137081,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "The quick brown fox jumps over the lazy dog.",
+    "run": 2,
+    "load_time_s": 10.520600875001037,
+    "ttfc_ms": 12357.988042000216,
+    "total_time_ms": 12357.988042000216,
+    "audio_duration_s": 2.72,
+    "rtf": 4.543377956617726,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "The quick brown fox jumps over the lazy dog.",
+    "run": 3,
+    "load_time_s": 10.335299333000876,
+    "ttfc_ms": 13934.980624999298,
+    "total_time_ms": 13934.980624999298,
+    "audio_duration_s": 2.4,
+    "rtf": 5.806241927083041,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Artificial intelligence is transforming the way we interact with technology.",
+    "run": 1,
+    "load_time_s": 11.3236604169997,
+    "ttfc_ms": 24085.510083999907,
+    "total_time_ms": 24085.510083999907,
+    "audio_duration_s": 3.88,
+    "rtf": 6.207605691752553,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Artificial intelligence is transforming the way we interact with technology.",
+    "run": 2,
+    "load_time_s": 13.025016916999448,
+    "ttfc_ms": 23418.141792000824,
+    "total_time_ms": 23418.141792000824,
+    "audio_duration_s": 3.32,
+    "rtf": 7.0536571662653085,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Artificial intelligence is transforming the way we interact with technology.",
+    "run": 3,
+    "load_time_s": 13.778199708000102,
+    "ttfc_ms": 19872.70512500072,
+    "total_time_ms": 19872.70512500072,
+    "audio_duration_s": 3.4,
+    "rtf": 5.844913272059036,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Welcome to our voice assistant. How can I help you?",
+    "run": 1,
+    "load_time_s": 12.076031041000533,
+    "ttfc_ms": 17875.612457999523,
+    "total_time_ms": 17875.612457999523,
+    "audio_duration_s": 2.96,
+    "rtf": 6.039058262837677,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Welcome to our voice assistant. How can I help you?",
+    "run": 2,
+    "load_time_s": 11.420081917000061,
+    "ttfc_ms": 25685.61900000168,
+    "total_time_ms": 25685.61900000168,
+    "audio_duration_s": 2.64,
+    "rtf": 9.729401136364272,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Welcome to our voice assistant. How can I help you?",
+    "run": 3,
+    "load_time_s": 14.456725541000196,
+    "ttfc_ms": 16089.351417000216,
+    "total_time_ms": 16089.351417000216,
+    "audio_duration_s": 2.44,
+    "rtf": 6.593996482377138,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Namaste, aaj ka mausam bahut accha hai.",
+    "run": 1,
+    "load_time_s": 13.859949583998969,
+    "ttfc_ms": 18348.09091599891,
+    "total_time_ms": 18348.09091599891,
+    "audio_duration_s": 3.4,
+    "rtf": 5.3964973282349735,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Namaste, aaj ka mausam bahut accha hai.",
+    "run": 2,
+    "load_time_s": 12.256785291001506,
+    "ttfc_ms": 16741.46145799932,
+    "total_time_ms": 16741.46145799932,
+    "audio_duration_s": 3.08,
+    "rtf": 5.435539434415364,
+    "error": null
+  },
+  {
+    "model": "Chatterbox-Nano",
+    "sentence": "Namaste, aaj ka mausam bahut accha hai.",
+    "run": 3,
+    "load_time_s": 11.357167457999822,
+    "ttfc_ms": 18080.243083000823,
+    "total_time_ms": 18080.243083000823,
+    "audio_duration_s": 3.52,
+    "rtf": 5.136432694034325,
+    "error": null
+  }
+]

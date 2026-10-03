@@ -71,6 +71,9 @@ async def health_check():
     is_deepgram_configured = bool(DEEPGRAM_API_KEY) and DEEPGRAM_API_KEY != "your_deepgram_api_key"
     is_llm_configured = bool(os.getenv("GROQ_API_KEY")) or (bool(GEMINI_API_KEY) and GEMINI_API_KEY != "your_gemini_api_key")
 
+    is_nc_enabled = os.getenv("LIVEKIT_NOISE_CANCELLATION", "true").lower() in ("true", "1", "yes")
+    nc_model = os.getenv("LIVEKIT_NOISE_CANCELLATION_MODEL", "BVC").upper()
+
     return {
         "status": "online",
         "livekit_url": LIVEKIT_URL,
@@ -78,6 +81,11 @@ async def health_check():
             "livekit": is_livekit_configured,
             "deepgram": is_deepgram_configured,
             "llm": is_llm_configured,
+            "noise_cancellation": is_nc_enabled,
+        },
+        "noise_cancellation": {
+            "enabled": is_nc_enabled,
+            "model": nc_model,
         },
         "message": (
             "All credentials configured!"
@@ -222,8 +230,8 @@ async def calibrate_voice(
         # 2. Extract acoustic metrics
         acoustics = voice_profile_manager.analyze_audio_acoustics(wav_bytes)
 
-        # 3. Transcribe speech via Deepgram STT
-        transcript = voice_profile_manager.transcribe_audio(wav_bytes)
+        # 3. Transcribe speech via Deepgram STT (with word timestamps)
+        transcript, words = voice_profile_manager.transcribe_audio_with_words(wav_bytes)
         if not transcript:
             transcript = "Hello! I am calibrating my voice, tone, and speaking style for our conversation."
 
@@ -238,13 +246,31 @@ async def calibrate_voice(
         profile_data["transcript"] = transcript
         profile_data["acoustics"] = acoustics
 
+        # 4b. Prepare 24kHz WAV and extract optimal aligned reference clip for F5-TTS
+        wav_24k_raw = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes, target_sample_rate=24000)
+        aligned_24k_bytes, aligned_ref_text = voice_profile_manager.extract_aligned_reference_clip(
+            wav_24k_raw, words, transcript
+        )
+        profile_data["ref_text"] = aligned_ref_text
+
         # 5. Synthesize a preview greeting in the mirrored persona & matched voice
         preview_text = profile_data.get(
             "preview_greeting",
             f"Hey {participant_name}! I've calibrated to your voice and tone. Let's chat!"
         )
-        recommended_voice = profile_data.get("recommended_voice", "aura-2-orion-en")
-        preview_bytes = voice_profile_manager.synthesize_preview_speech(preview_text, recommended_voice)
+        recommended_voice = profile_data.get("recommended_voice", "f5-tts")
+
+        # Create temporary 24k wav reference for preview synthesis if needed
+        clean_name = "".join(c for c in participant_name if c.isalnum() or c in ("-", "_")).lower() or "user-default"
+        temp_24k_path = voice_profile_manager.PROFILES_DIR / f"{clean_name}_ref_24k.wav"
+        temp_24k_path.write_bytes(aligned_24k_bytes)
+
+        preview_bytes = voice_profile_manager.synthesize_preview_speech(
+            preview_text,
+            recommended_voice,
+            ref_audio_path=str(temp_24k_path),
+            ref_text=aligned_ref_text,
+        )
 
         # 6. Save reference WAV and profile JSON
         saved_profile = voice_profile_manager.save_voice_profile(
@@ -252,6 +278,7 @@ async def calibrate_voice(
             profile_data=profile_data,
             wav_bytes=wav_bytes,
             preview_bytes=preview_bytes,
+            wav_24k_bytes=aligned_24k_bytes,
         )
 
         return saved_profile

@@ -39,6 +39,12 @@ from livekit.agents.llm import ChatMessage
 from livekit.agents.voice import agent_session
 from livekit.plugins import silero, deepgram
 from livekit.plugins import openai as lk_openai
+try:
+    from livekit.plugins import noise_cancellation
+    NOISE_CANCELLATION_AVAILABLE = True
+except ImportError:
+    NOISE_CANCELLATION_AVAILABLE = False
+    noise_cancellation = None
 from livekit.agents.metrics import LLMMetrics, TTSMetrics, STTMetrics, EOUMetrics
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
@@ -50,10 +56,13 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
 STT_MODEL = os.getenv("DEEPGRAM_STT_MODEL", "nova-2-general")
 STT_LANGUAGE = os.getenv("DEEPGRAM_STT_LANGUAGE", "en-IN")
 TTS_MODEL = os.getenv("DEEPGRAM_TTS_MODEL", "en-IN-PrabhatNeural")
-LLM_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+LLM_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
-MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "100"))
+MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "150"))
 MAX_CHAT_HISTORY = int(os.getenv("MAX_CHAT_HISTORY", "6"))
+
+ENABLE_NOISE_CANCELLATION = os.getenv("LIVEKIT_NOISE_CANCELLATION", "true").lower() in ("true", "1", "yes")
+NOISE_CANCELLATION_MODEL = os.getenv("LIVEKIT_NOISE_CANCELLATION_MODEL", "BVC").upper()
 
 
 from typing import AsyncIterable, Union, Optional
@@ -179,13 +188,14 @@ server = AgentServer(
 async def voice_agent_session(ctx: JobContext):
     logger.info(f"Starting voice agent session for room '{ctx.room.name}'...")
 
-    # Noise-resilient VAD:
-    # - activation_threshold=0.7: requires intentional vocal energy (ignores ambient murmur, fans, AC)
-    # - min_speech_duration=0.35: ignores short sounds under 350ms (throat clears, sighs, breaths, mic pops)
+    # Balanced VAD tuned for conversational responsiveness:
+    # - activation_threshold=0.60: reliable speech detection while rejecting faint background noise
+    # - min_speech_duration=0.20: avoids false triggers on coughs, clicks, or keyboard taps
+    # - min_silence_duration=0.50: allows natural short pauses during thought/breathing (500ms)
     vad = silero.VAD.load(
-        activation_threshold=0.7,
-        min_speech_duration=0.35,
-        min_silence_duration=0.5,
+        activation_threshold=0.60,
+        min_speech_duration=0.20,
+        min_silence_duration=0.50,
     )
     stt = deepgram.STT(
         model=STT_MODEL,
@@ -202,27 +212,81 @@ async def voice_agent_session(ctx: JobContext):
         extra_body={"max_tokens": MAX_TOKENS},  # Hard cap completion tokens to prevent verbose burn
     )
     from edge_tts_adapter import EdgeTTS
+    from f5_tts_adapter import F5TTS, is_f5_tts_available
+    from luxtts_adapter import LuxTTSLiveKit, is_luxtts_available
+    from pocket_tts_adapter import PocketTTSLiveKit, is_pocket_tts_available
 
-    active_profile = voice_profile_manager.get_voice_profile("")
+    active_profile = None
+    for p in ctx.room.remote_participants.values():
+        if getattr(p, "kind", None) != rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
+            active_profile = voice_profile_manager.get_voice_profile(p.identity) or voice_profile_manager.get_voice_profile(getattr(p, "name", ""))
+            if active_profile:
+                break
+    if not active_profile:
+        active_profile = voice_profile_manager.get_voice_profile("")
     selected_tts_model = active_profile.get("recommended_voice", TTS_MODEL) if active_profile else TTS_MODEL
     logger.info(f"Selected TTS voice model: {selected_tts_model}")
-    if selected_tts_model.startswith("en-IN-") or selected_tts_model.startswith("hi-IN-") or "Neural" in selected_tts_model:
-        tts = EdgeTTS(voice=selected_tts_model)
-    else:
-        tts = deepgram.TTS(model=selected_tts_model, api_key=DEEPGRAM_API_KEY)
 
-    # AgentSession with noise & false-interruption guards:
-    # Requires user to speak for at least 500ms or 2 words before interrupting the bot,
-    # and automatically resumes speaking if a momentary sound cuts in with no actual speech.
+    tts = None
+    # 1. Check LuxTTS (Voicebox 48kHz ultra-fast voice cloning)
+    if (selected_tts_model == "luxtts" or "lux" in selected_tts_model.lower()) and is_luxtts_available():
+        ref_wav = active_profile.get("ref_wav_file") or active_profile.get("ref_wav_24k_file") if active_profile else None
+        try:
+            tts = LuxTTSLiveKit(ref_audio_path=ref_wav, num_steps=4, speed=1.0)
+            logger.info(f"🎙️ Initialized LuxTTS (Voicebox 48kHz) cloned voice adapter (ref: {ref_wav})")
+        except Exception as e:
+            logger.warning(f"Could not initialize LuxTTS, falling back: {e}")
+            tts = None
+
+    # 2. Check PocketTTS (CPU-only, 100M params, ~6x real-time, voice cloning)
+    if tts is None and (selected_tts_model == "pocket-tts" or "pocket" in selected_tts_model.lower()) and is_pocket_tts_available():
+        ref_wav = active_profile.get("ref_wav_file") or active_profile.get("ref_wav_24k_file") if active_profile else None
+        safetensors = active_profile.get("pocket_tts_safetensors") if active_profile else None
+        pocket_voice = active_profile.get("pocket_tts_voice", "alba") if active_profile else "alba"
+        pocket_lang = active_profile.get("pocket_tts_language", "english") if active_profile else "english"
+        try:
+            tts = PocketTTSLiveKit(
+                voice=pocket_voice,
+                ref_audio_path=ref_wav,
+                safetensors_path=safetensors,
+                language=pocket_lang,
+            )
+            logger.info(f"🎙️ Initialized PocketTTS adapter (voice={pocket_voice}, ref={ref_wav}, lang={pocket_lang})")
+        except Exception as e:
+            logger.warning(f"Could not initialize PocketTTS, falling back: {e}")
+            tts = None
+
+    # 3. Check F5-TTS cloned voice adapter
+    if tts is None and (selected_tts_model == "f5-tts" or "f5" in selected_tts_model.lower()) and is_f5_tts_available():
+        ref_24k = active_profile.get("ref_wav_24k_file") if active_profile else None
+        ref_text = active_profile.get("ref_text") if active_profile else None
+        try:
+            tts = F5TTS(ref_audio_path=ref_24k, ref_audio_text=ref_text, steps=6, speed=1.0, cfg_strength=2.0)
+            logger.info(f"🎙️ Initialized F5-TTS cloned voice adapter (ref: {ref_24k}, steps=6, cfg=2.0)")
+        except Exception as e:
+            logger.warning(f"Could not initialize F5-TTS, falling back to EdgeTTS: {e}")
+            tts = None
+
+    if tts is None:
+        if selected_tts_model.startswith("en-IN-") or selected_tts_model.startswith("hi-IN-") or "Neural" in selected_tts_model or selected_tts_model in ("f5-tts", "luxtts", "pocket-tts"):
+            edge_voice = "en-IN-PrabhatNeural" if selected_tts_model in ("f5-tts", "luxtts", "pocket-tts") else selected_tts_model
+            tts = EdgeTTS(voice=edge_voice)
+        else:
+            tts = deepgram.TTS(model=selected_tts_model, api_key=DEEPGRAM_API_KEY)
+
+    # AgentSession configured for smooth conversational flow without false interruptions:
+    # - min_endpointing_delay=0.50: waits 500ms after user pauses before responding
+    # - Interruption: requires 500ms duration and at least 2 spoken words, preventing speaker echo from cutting off speech
     session = AgentSession(
         vad=vad,
         stt=stt,
         llm=llm,
         tts=tts,
+        min_endpointing_delay=0.50,
         turn_handling=agent_session.TurnHandlingOptions(
             interruption=agent_session.InterruptionOptions(
-                min_duration=0.3,
-                min_words=1,
+                min_duration=0.50,
+                min_words=2,
                 resume_false_interruption=True,
             )
         ),
@@ -361,6 +425,19 @@ async def voice_agent_session(ctx: JobContext):
                         topic="lk-agent-stream",
                     )
                 )
+            elif payload.get("action") == "get_noise_cancellation":
+                now_ts = int(time.time() * 1000)
+                asyncio.create_task(
+                    ctx.room.local_participant.publish_data(
+                        json.dumps({
+                            "type": "noise_cancellation_status",
+                            "backend_enabled": nc_filter is not None,
+                            "backend_model": nc_status_str,
+                            "timestamp": now_ts,
+                        }).encode(),
+                        topic="lk-agent-stream",
+                    )
+                )
         except Exception as err:
             logger.warning(f"Error handling room data packet: {err}")
 
@@ -428,6 +505,36 @@ async def voice_agent_session(ctx: JobContext):
         )
         greeting_text = active_profile.get("preview_greeting") or f"Hey {p_name}! I have tuned into your voice, tone, and accent. Let's chat!"
 
+    # Configure backend server-side neural noise cancellation
+    nc_filter = None
+    nc_status_str = "Disabled"
+    if ENABLE_NOISE_CANCELLATION and NOISE_CANCELLATION_AVAILABLE:
+        try:
+            if NOISE_CANCELLATION_MODEL == "NC":
+                nc_filter = noise_cancellation.NC()
+                nc_status_str = "NC (Neural Noise Cancellation)"
+                logger.info("🛡️ [Noise Cancellation] Enabled LiveKit NC (Neural Noise Cancellation) filter")
+            else:
+                nc_filter = noise_cancellation.BVC()
+                nc_status_str = "BVC (Background Voice Cancellation)"
+                logger.info("🛡️ [Noise Cancellation] Enabled LiveKit BVC (Background Voice Cancellation) filter")
+        except Exception as nc_err:
+            logger.warning(f"Could not initialize {NOISE_CANCELLATION_MODEL} noise cancellation: {nc_err}")
+            try:
+                nc_filter = noise_cancellation.NC()
+                nc_status_str = "NC (Fallback Filter)"
+                logger.info("🛡️ [Noise Cancellation] Fallback to LiveKit NC filter")
+            except Exception as nc_err2:
+                logger.warning(f"Failed to initialize fallback NC filter: {nc_err2}")
+                nc_filter = None
+                nc_status_str = "Unavailable"
+    else:
+        logger.info("ℹ️ [Noise Cancellation] Backend noise cancellation disabled by config")
+
+    audio_input_opts = room_io.AudioInputOptions(
+        noise_cancellation=nc_filter,
+    ) if nc_filter is not None else True
+
     # Start session — RoomIO handles audio and lk.chat text stream automatically
     await session.start(
         agent=VoiceAssistant(ctx, instructions=agent_instructions),
@@ -435,6 +542,7 @@ async def voice_agent_session(ctx: JobContext):
         room_options=room_io.RoomOptions(
             text_input=True,
             close_on_disconnect=False,
+            audio_input=audio_input_opts,
         ),
     )
 
@@ -448,6 +556,10 @@ async def voice_agent_session(ctx: JobContext):
                 "type": "pipeline_info",
                 "pipeline": "indian-voice",
                 "model": "Indian Neural Voice Assistant",
+                "noise_cancellation": {
+                    "backend_enabled": nc_filter is not None,
+                    "backend_model": nc_status_str,
+                },
                 "timestamp": int(time.time() * 1000),
             }).encode(),
             topic="lk-agent-stream",

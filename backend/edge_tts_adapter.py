@@ -78,10 +78,18 @@ class EdgeChunkedStream(tts.ChunkedStream):
         self._sample_rate = sample_rate
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        output_emitter.initialize(
+            request_id=utils.shortuuid(),
+            sample_rate=self._sample_rate,
+            num_channels=1,
+            mime_type="audio/pcm",
+        )
+
         clean_text = self._input_text.strip()
         # EdgeTTS fails with NoAudioReceived if given only punctuation or whitespace
         stripped_alnum = re.sub(r"[^\w\s]", "", clean_text)
         if not clean_text or not stripped_alnum.strip():
+            output_emitter.flush()
             return
 
         target_voice = resolve_voice_for_text(self._voice, clean_text)
@@ -115,6 +123,7 @@ class EdgeChunkedStream(tts.ChunkedStream):
 
         full_mp3 = b"".join(mp3_bytes)
         if not full_mp3:
+            output_emitter.flush()
             return
 
         try:
@@ -122,13 +131,6 @@ class EdgeChunkedStream(tts.ChunkedStream):
             in_stream = container.streams.audio[0]
             resampler = av.AudioResampler(
                 format="s16", layout="mono", rate=self._sample_rate
-            )
-
-            output_emitter.initialize(
-                request_id=utils.shortuuid(),
-                sample_rate=self._sample_rate,
-                num_channels=1,
-                mime_type="audio/pcm",
             )
 
             for frame in container.decode(in_stream):

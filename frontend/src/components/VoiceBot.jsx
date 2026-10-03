@@ -8,10 +8,11 @@ import {
   useChat,
   RoomAudioRenderer,
 } from '@livekit/components-react';
+import { useKrispNoiseFilter } from '@livekit/components-react/krisp';
 import { AudioVisualizer } from './AudioVisualizer';
 import { ChatTranscript } from './ChatTranscript';
 import { ControlBar } from './ControlBar';
-import { Wifi, User, Bot, AlertTriangle, CheckCircle2, Sparkles } from '../icons';
+import { Wifi, User, Bot, AlertTriangle, CheckCircle2, Sparkles, ShieldCheck } from '../icons';
 
 export function VoiceBot({ onDisconnect, roomName, participantName, initialProfile }) {
   const room = useRoomContext();
@@ -20,6 +21,19 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
   const remoteParticipants = useRemoteParticipants();
   const speakingParticipants = useSpeakingParticipants();
   const { chatMessages, send: sendChatMessage } = useChat();
+
+  // Krisp Neural Noise Filter on local microphone audio
+  const {
+    isNoiseFilterEnabled,
+    setNoiseFilterEnabled,
+    isNoiseFilterPending,
+  } = useKrispNoiseFilter();
+
+  // Server-side noise cancellation status from backend agent
+  const [serverNoiseFilter, setServerNoiseFilter] = useState({
+    backend_enabled: true,
+    backend_model: 'BVC (Background Voice Cancellation)',
+  });
 
   const [isMuted, setIsMuted] = useState(!isMicrophoneEnabled);
   const [voiceMessages, setVoiceMessages] = useState([]);
@@ -32,6 +46,26 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
   const [clonedProfile, setClonedProfile] = useState(initialProfile || null);
   // Active pipeline info (e.g. Moshi speech-to-speech)
   const [pipelineInfo, setPipelineInfo] = useState(null);
+
+  // Auto-enable Krisp noise cancellation if supported
+  useEffect(() => {
+    let mounted = true;
+    if (setNoiseFilterEnabled && !isNoiseFilterEnabled && !isNoiseFilterPending) {
+      setNoiseFilterEnabled(true).catch((err) => {
+        console.info('Krisp noise filter status:', err?.message || 'Using WebRTC hardware noise isolation');
+      });
+    }
+    return () => { mounted = false; };
+  }, [setNoiseFilterEnabled]);
+
+  const handleToggleNoiseFilter = async () => {
+    if (!setNoiseFilterEnabled || isNoiseFilterPending) return;
+    try {
+      await setNoiseFilterEnabled(!isNoiseFilterEnabled);
+    } catch (err) {
+      console.warn('Failed to toggle noise filter:', err);
+    }
+  };
 
   // Sync mic state and ensure mic is active on mount
   useEffect(() => {
@@ -121,6 +155,16 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
         const data = JSON.parse(new TextDecoder().decode(payload));
         if (data.type === 'pipeline_info') {
           setPipelineInfo(data);
+          if (data.noise_cancellation) {
+            setServerNoiseFilter(data.noise_cancellation);
+          }
+          return;
+        }
+        if (data.type === 'noise_cancellation_status') {
+          setServerNoiseFilter({
+            backend_enabled: data.backend_enabled,
+            backend_model: data.backend_model,
+          });
           return;
         }
         if (data.type === 'stream_start') {
@@ -151,13 +195,15 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
             const completed = { ...streamingRef.current, streaming: false };
             streamingRef.current = null;
             setStreamingMessage(null);
-            setVoiceMessages(msgs => {
-              // Strictly avoid adding the same stream_id twice (prevents React StrictMode duplication)
-              if (msgs.some(m => m.streamId === data.stream_id || m.id === completed.id)) {
-                return msgs;
-              }
-              return [...msgs, completed];
-            });
+            if (completed.text && completed.text.trim()) {
+              setVoiceMessages(msgs => {
+                // Strictly avoid adding the same stream_id twice (prevents React StrictMode duplication)
+                if (msgs.some(m => m.streamId === data.stream_id || m.id === completed.id)) {
+                  return msgs;
+                }
+                return [...msgs, completed];
+              });
+            }
           }
         }
       } catch (e) {
@@ -218,8 +264,8 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
 
     const all = [...chatMsgs, ...uniqueVoiceMsgs];
     all.sort((a, b) => a.rawTimestamp - b.rawTimestamp);
-    // Append the live streaming message at the end (if not already completed)
-    if (streamingMessage && !seen.has(streamingMessage.streamId)) {
+    // Append the live streaming message at the end (if not already completed and has text)
+    if (streamingMessage && streamingMessage.text && streamingMessage.text.trim() && !seen.has(streamingMessage.streamId)) {
       all.push(streamingMessage);
     }
     return all;
@@ -272,7 +318,7 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           try {
             audio.muted = false;
             audio.play().catch((e) => console.debug('Audio re-arm error:', e));
-          } catch (e) {}
+          } catch (e) { }
         });
       }, 300);
 
@@ -298,7 +344,7 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           if (audio.paused) {
             audio.play().catch((err) => console.debug('Audio auto-resume error:', err));
           }
-        } catch (e) {}
+        } catch (e) { }
       });
     }
   }, [isBotSpeaking]);
@@ -404,10 +450,37 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '380px', lineHeight: 1.5 }}>
               {hasAgentConnected
                 ? (clonedProfile
-                    ? `Speaking in natural ${clonedProfile.accent || 'Indian English'} with ${clonedProfile.tone || 'warm conversational tone'}.`
-                    : 'Speak naturally through your microphone or type in the chat.')
+                  ? `Speaking in natural ${clonedProfile.accent || 'Indian English'} with ${clonedProfile.tone || 'warm conversational tone'}.`
+                  : 'Speak naturally through your microphone or type in the chat.')
                 : 'Waiting for agent worker to connect...'}
             </p>
+
+            {/* Noise Cancellation Badge Indicator */}
+            <div
+              onClick={handleToggleNoiseFilter}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginTop: '10px',
+                padding: '4px 12px',
+                borderRadius: '9999px',
+                background: isNoiseFilterEnabled ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                border: isNoiseFilterEnabled ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid var(--border-subtle)',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                color: isNoiseFilterEnabled ? '#6ee7b7' : 'var(--text-muted)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              title={`Click to toggle Noise Filter.\n• Frontend: ${isNoiseFilterEnabled ? 'Krisp AI + WebRTC Filter Enabled' : 'Off'}\n• Backend: ${serverNoiseFilter?.backend_enabled ? serverNoiseFilter.backend_model : 'Off'}`}
+            >
+              <ShieldCheck size={13} color={isNoiseFilterEnabled ? '#34d399' : 'var(--text-muted)'} strokeWidth={1.8} />
+              <span>
+                {isNoiseFilterEnabled ? 'AI Noise Filter: Active' : 'Noise Filter: Off'}
+                {serverNoiseFilter?.backend_enabled ? ` • Server: ${serverNoiseFilter.backend_model.split(' ')[0]}` : ''}
+              </span>
+            </div>
           </div>
 
           <AudioVisualizer
@@ -435,6 +508,10 @@ export function VoiceBot({ onDisconnect, roomName, participantName, initialProfi
           isSpeaking={isUserSpeaking}
           isBotSpeaking={isBotSpeaking}
           onInterrupt={handleInterrupt}
+          isNoiseFilterEnabled={isNoiseFilterEnabled}
+          onToggleNoiseFilter={handleToggleNoiseFilter}
+          isNoiseFilterPending={isNoiseFilterPending}
+          serverNoiseFilter={serverNoiseFilter}
         />
       </div>
     </div>

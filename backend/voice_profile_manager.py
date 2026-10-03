@@ -97,9 +97,10 @@ def analyze_audio_acoustics(wav_bytes: bytes, sample_rate: int = 16000) -> Dict[
         return {"duration": 5.0, "pitch_hz": 150.0, "gender_hint": "male", "energy": "medium"}
 
 
-def transcribe_audio(wav_bytes: bytes) -> str:
+def transcribe_audio_with_words(wav_bytes: bytes) -> tuple[str, list]:
     """
-    Transcribes the user audio using Deepgram Nova-2 STT.
+    Transcribes the user audio using Deepgram Nova-2 STT, returning both
+    the full transcript and word-level timestamps.
     """
     if not DEEPGRAM_API_KEY:
         raise ValueError("DEEPGRAM_API_KEY is missing in backend/.env")
@@ -116,12 +117,83 @@ def transcribe_audio(wav_bytes: bytes) -> str:
 
     data = response.json()
     try:
-        transcript = (
-            data["results"]["channels"][0]["alternatives"][0]["transcript"].strip()
-        )
-        return transcript
+        alt = data["results"]["channels"][0]["alternatives"][0]
+        transcript = alt.get("transcript", "").strip()
+        words = alt.get("words", [])
+        return transcript, words
     except (KeyError, IndexError):
-        return ""
+        return "", []
+
+
+def transcribe_audio(wav_bytes: bytes) -> str:
+    """Convenience wrapper returning just the transcript."""
+    transcript, _ = transcribe_audio_with_words(wav_bytes)
+    return transcript
+
+
+def extract_aligned_reference_clip(
+    wav_24k_bytes: bytes,
+    words: list,
+    full_transcript: str,
+) -> tuple[bytes, str]:
+    """
+    Extracts an optimal reference audio segment (between 3.5s and 6.8s) and the exact
+    matching reference text for F5-TTS voice cloning.
+    F5-TTS requires that reference text and reference audio match 100%.
+    Any mismatch causes severe mumbling, slurring, or unintelligible speech.
+    """
+    if not words or len(words) == 0:
+        return wav_24k_bytes, (full_transcript or "Hello, I am calibrating my voice.").strip()
+
+    total_duration = words[-1].get("end", 0.0)
+    # If the recording is already short and optimal (<= 6.5s), keep the full clip and text
+    if total_duration <= 6.5:
+        ref_text = " ".join(w.get("punctuated_word", w.get("word", "")) for w in words).strip()
+        return wav_24k_bytes, ref_text or full_transcript
+
+    # Find the best sentence boundary (. ! ?) between 3.5s and 6.8s
+    cand_idx = None
+    for i, w in enumerate(words):
+        p_word = w.get("punctuated_word", w.get("word", ""))
+        end_t = w.get("end", 0.0)
+        if 3.5 <= end_t <= 6.8 and any(p_word.endswith(p) for p in (".", "!", "?")):
+            cand_idx = i
+            break
+
+    # If no sentence boundary in range, search for comma or inter-word pause (>= 200ms)
+    if cand_idx is None:
+        for i, w in enumerate(words):
+            p_word = w.get("punctuated_word", w.get("word", ""))
+            end_t = w.get("end", 0.0)
+            is_comma = p_word.endswith(",") or p_word.endswith(";")
+            has_pause = (i + 1 < len(words) and (words[i + 1].get("start", end_t) - end_t >= 0.2))
+            if 3.5 <= end_t <= 6.8 and (is_comma or has_pause):
+                cand_idx = i
+                break
+
+    # If still none found, pick the word closest to 5.2s
+    if cand_idx is None:
+        cand_idx = min(range(len(words)), key=lambda i: abs(words[i].get("end", 0.0) - 5.2))
+
+    chosen_word = words[cand_idx]
+    cut_time = min(chosen_word.get("end", 5.0) + 0.12, total_duration)
+    ref_text = " ".join(w.get("punctuated_word", w.get("word", "")) for w in words[:cand_idx + 1]).strip()
+
+    # Slice the 24kHz audio bytes up to cut_time
+    try:
+        import soundfile as sf
+        in_buf = io.BytesIO(wav_24k_bytes)
+        audio_data, sr = sf.read(in_buf)
+        max_samples = int(cut_time * sr)
+        cut_audio = audio_data[:max_samples]
+        out_buf = io.BytesIO()
+        sf.write(out_buf, cut_audio, sr, format="wav")
+        sliced_wav_bytes = out_buf.getvalue()
+        logger.info(f"✂️ Aligned reference clip: {cut_time:.2f}s ({cand_idx+1} words) | '{ref_text}'")
+        return sliced_wav_bytes, ref_text
+    except Exception as e:
+        logger.warning(f"Failed to slice audio for reference clip: {e}")
+        return wav_24k_bytes, full_transcript
 
 
 async def _edge_tts_synth(text: str, voice: str) -> bytes:
@@ -156,8 +228,12 @@ def generate_voice_profile(
     # Determine recommended voice based on user preference and gender register
     if preferred_voice:
         default_voice = preferred_voice
+    elif "lux" in preferred_accent.lower():
+        default_voice = "luxtts"
+    elif "clone" in preferred_accent.lower() or "f5" in preferred_accent.lower():
+        default_voice = "luxtts"
     elif "indian" in preferred_accent.lower():
-        default_voice = "en-IN-PrabhatNeural" if gender_hint == "male" else "en-IN-NeerjaExpressiveNeural"
+        default_voice = "luxtts"
     elif gender_hint == "female":
         default_voice = "aura-2-asteria-en"
     else:
@@ -238,17 +314,95 @@ Return ONLY a valid JSON object with these exact keys:
                 "conversational phrases like 'got it', 'sure thing', 'definitely', 'tell me'. "
                 "Keep responses concise and lively, avoiding generic American AI phrasing."
             ),
-            "preview_greeting": f"Namaste {participant_name}! I have tuned into your Indian English voice and tone. How can I help you today?",
+            "preview_greeting": f"Namaste {participant_name}! I have tuned into your voice, accent, and style. How can I help you today?",
             "recommended_voice": default_voice,
         }
 
 
-def synthesize_preview_speech(text: str, voice_model: str) -> bytes:
+def synthesize_preview_speech(
+    text: str,
+    voice_model: str,
+    ref_audio_path: Optional[str] = None,
+    ref_text: Optional[str] = None,
+) -> bytes:
     """
-    Synthesizes preview audio using Edge-TTS (for authentic Indian English neural voices)
+    Synthesizes preview audio using F5-TTS (cloned voice), Edge-TTS (for authentic Indian English neural voices),
     or Deepgram TTS (for Aura models).
     """
     import asyncio
+
+    # If LuxTTS (Voicebox 48kHz ultra-fast voice cloning) is requested
+    if voice_model == "luxtts" or "lux" in voice_model.lower():
+        try:
+            from luxtts_adapter import is_luxtts_available, synthesize_preview_mp3
+            # Use 16k or original reference wav
+            ref_path = ref_audio_path
+            if ref_path and "_24k" in ref_path:
+                alt_16k = ref_path.replace("_ref_24k.wav", "_ref.wav")
+                if os.path.exists(alt_16k):
+                    ref_path = alt_16k
+            if is_luxtts_available() and ref_path and os.path.exists(ref_path):
+                return synthesize_preview_mp3(text, ref_path)
+        except Exception as e:
+            logger.warning(f"LuxTTS preview synthesis error: {e}, falling back to F5-TTS / EdgeTTS")
+
+    # If PocketTTS voice cloning is requested (CPU-only, no GPU needed)
+    if voice_model == "pocket-tts" or "pocket" in voice_model.lower():
+        try:
+            from pocket_tts_adapter import is_pocket_tts_available, synthesize_preview_mp3
+            if is_pocket_tts_available():
+                return synthesize_preview_mp3(
+                    text=text,
+                    ref_audio_path=ref_audio_path if (ref_audio_path and os.path.exists(ref_audio_path)) else None,
+                    voice="alba",
+                )
+        except Exception as e:
+            logger.warning(f"PocketTTS preview synthesis error: {e}, falling back to EdgeTTS")
+            voice_model = "en-IN-PrabhatNeural"
+
+    # If F5-TTS cloned voice is requested and local MLX is available
+    if voice_model == "f5-tts" or "f5" in voice_model.lower():
+        try:
+            from f5_tts_adapter import is_f5_tts_available, get_f5_model, load_ref_audio
+            if is_f5_tts_available() and ref_audio_path and os.path.exists(ref_audio_path):
+                import mlx.core as mx  # type: ignore
+                from f5_tts_mlx.generate import estimated_duration, FRAMES_PER_SEC, convert_char_to_pinyin
+                
+                model = get_f5_model()
+                audio = load_ref_audio(ref_audio_path, target_sr=24000)
+                ref_t = ref_text or "Hello, I am calibrating my voice."
+                dur_frames = int(estimated_duration(audio, ref_t, text, speed=1.0) * FRAMES_PER_SEC)
+                formatted_text = convert_char_to_pinyin([ref_t + " " + text])
+                
+                wave, _ = model.sample(
+                    mx.expand_dims(audio, axis=0),
+                    text=formatted_text,
+                    duration=dur_frames,
+                    steps=8,
+                    method="euler",
+                    cfg_strength=2.0,
+                )
+                wave = wave[audio.shape[0]:]
+                mx.eval(wave)
+                
+                np_wave = np.array(wave, dtype=np.float32)
+                pcm16 = (np.clip(np_wave, -1.0, 1.0) * 32767).astype(np.int16)
+                
+                # Encode PCM to MP3 using PyAV for web playback
+                out_buf = io.BytesIO()
+                out_container = av.open(out_buf, mode="w", format="mp3")
+                out_stream = out_container.add_stream("mp3", rate=24000)
+                frame = av.AudioFrame.from_ndarray(pcm16.reshape(1, -1), format="s16", layout="mono")
+                frame.sample_rate = 24000
+                for packet in out_stream.encode(frame):
+                    out_container.mux(packet)
+                for packet in out_stream.encode(None):
+                    out_container.mux(packet)
+                out_container.close()
+                return out_buf.getvalue()
+        except Exception as e:
+            logger.warning(f"F5-TTS preview synthesis fallback to EdgeTTS: {e}")
+            voice_model = "en-IN-PrabhatNeural"
 
     # If it's an EdgeTTS regional voice (e.g. Indian English)
     if voice_model.startswith("en-IN-") or voice_model.startswith("hi-IN-") or "Neural" in voice_model:
@@ -256,7 +410,6 @@ def synthesize_preview_speech(text: str, voice_model: str) -> bytes:
             return asyncio.run(_edge_tts_synth(text, voice_model))
         except Exception as e:
             logger.error(f"EdgeTTS preview synthesis error: {e}", exc_info=True)
-            # fallback to Deepgram
             voice_model = "aura-2-orion-en"
 
     # Otherwise Deepgram
@@ -284,27 +437,37 @@ def save_voice_profile(
     profile_data: Dict[str, Any],
     wav_bytes: bytes,
     preview_bytes: bytes,
+    wav_24k_bytes: Optional[bytes] = None,
 ) -> Dict[str, Any]:
     """
-    Saves the user's reference WAV, preview MP3, and JSON metadata.
+    Saves the user's reference WAV (16kHz + 24kHz), preview MP3, and JSON metadata.
     """
     clean_name = "".join(c for c in participant_name if c.isalnum() or c in ("-", "_")).lower()
     if not clean_name:
         clean_name = "user-default"
 
     ref_wav_path = PROFILES_DIR / f"{clean_name}_ref.wav"
+    ref_wav_24k_path = PROFILES_DIR / f"{clean_name}_ref_24k.wav"
     preview_mp3_path = PROFILES_DIR / f"{clean_name}_preview.mp3"
     profile_json_path = PROFILES_DIR / f"{clean_name}.json"
 
-    # Write files
+    # Write 16kHz reference WAV and preview MP3
     ref_wav_path.write_bytes(wav_bytes)
     preview_mp3_path.write_bytes(preview_bytes)
+
+    # Write 24kHz reference WAV (for F5-TTS)
+    if wav_24k_bytes:
+        ref_wav_24k_path.write_bytes(wav_24k_bytes)
+    else:
+        ref_wav_24k_path.write_bytes(convert_audio_to_wav(wav_bytes, target_sample_rate=24000))
 
     full_profile = {
         **profile_data,
         "participant_name": participant_name,
         "clean_name": clean_name,
         "ref_wav_file": str(ref_wav_path),
+        "ref_wav_24k_file": str(ref_wav_24k_path),
+        "ref_text": profile_data.get("ref_text") or profile_data.get("transcript", ""),
         "preview_audio_url": f"/api/voice-clone/preview/{clean_name}",
         "created_at": int(time.time()),
     }
@@ -312,7 +475,7 @@ def save_voice_profile(
     with open(profile_json_path, "w", encoding="utf-8") as f:
         json.dump(full_profile, f, indent=2)
 
-    logger.info(f"Saved calibrated voice profile for '{clean_name}'")
+    logger.info(f"Saved calibrated voice profile for '{clean_name}' (F5-TTS reference ready)")
     return full_profile
 
 

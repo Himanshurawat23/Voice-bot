@@ -21,6 +21,27 @@ const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
 const ACCENT_VOICE_OPTIONS = [
   {
+    id: 'luxtts-voicebox',
+    label: '⚡ LuxTTS (Voicebox 48kHz Ultra-Fast)',
+    accent: 'Indian English (Cloned 48kHz)',
+    voice: 'luxtts',
+    description: 'Ultra-fast, CPU-friendly 48kHz cloning from Voicebox (<1GB VRAM, 4-step distilled)',
+  },
+  {
+    id: 'f5-clone',
+    label: '✨ F5-TTS Neural Voice Clone (Apple M4 Local)',
+    accent: 'Indian English (Cloned)',
+    voice: 'f5-tts',
+    description: 'Exact zero-shot neural cloning replicating your voice, timbre & pitch locally on Apple Silicon',
+  },
+  {
+    id: 'pocket-tts',
+    label: '🗣️ PocketTTS Voice Clone (CPU, No GPU)',
+    accent: 'Indian English (Cloned)',
+    voice: 'pocket-tts',
+    description: 'Kyutai Labs 100M model — voice cloning on any CPU, ~6x real-time, 7 languages supported',
+  },
+  {
     id: 'in-male',
     label: '🇮🇳 Indian English (Male - Prabhat)',
     accent: 'Indian English',
