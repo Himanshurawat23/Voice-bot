@@ -59,9 +59,22 @@ DEFAULT_VOICE = "alba"
 
 
 def is_pocket_tts_available() -> bool:
-    """Check if pocket-tts is installed and importable."""
+    """Check if pocket-tts is installed, importable, and safe to run in the current environment."""
     try:
         from pocket_tts import TTSModel  # noqa: F401
+
+        # Render free/starter tiers have strict 512MB RAM limits enforced by cgroups.
+        # PocketTTS + PyTorch runtime requires ~750MB RAM, causing container OOM crashes.
+        # When running on Render, gracefully yield to EdgeTTS/Deepgram unless explicitly enabled.
+        if os.environ.get("RENDER"):
+            force_enable = os.environ.get("ENABLE_POCKET_TTS_ON_RENDER", "false").lower() == "true"
+            if not force_enable:
+                logger.info(
+                    "Detected Render cloud container (512MB RAM limit). "
+                    "PocketTTS requires ~750MB RAM. Falling back to zero-RAM EdgeTTS/Deepgram to prevent OOM."
+                )
+                return False
+
         return True
     except ImportError:
         logger.debug("pocket-tts not installed. Install with: pip install pocket-tts")

@@ -226,17 +226,21 @@ async def calibrate_voice(
 
         def _do_calibration():
             # 1. Convert to 16kHz mono WAV via PyAV
+            logger.info(f"Calibration [1/6]: Converting audio ({len(raw_audio_bytes)} bytes) to 16kHz WAV...")
             wav_bytes = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes)
 
             # 2. Extract acoustic metrics
+            logger.info("Calibration [2/6]: Analyzing audio acoustics...")
             acoustics = voice_profile_manager.analyze_audio_acoustics(wav_bytes)
 
             # 3. Transcribe speech via Deepgram STT (with word timestamps)
+            logger.info("Calibration [3/6]: Transcribing speech with Deepgram STT...")
             transcript, words = voice_profile_manager.transcribe_audio_with_words(wav_bytes)
             if not transcript:
                 transcript = "Hello! I am calibrating my voice, tone, and speaking style for our conversation."
 
             # 4. Generate linguistic profile & mirror prompt via Groq
+            logger.info("Calibration [4/6]: Generating linguistic profile & mirror prompt via Groq...")
             profile_data = voice_profile_manager.generate_voice_profile(
                 transcript=transcript,
                 acoustics=acoustics,
@@ -248,6 +252,7 @@ async def calibrate_voice(
             profile_data["acoustics"] = acoustics
 
             # 4b. Prepare 24kHz WAV and extract optimal aligned reference clip for F5-TTS / PocketTTS
+            logger.info("Calibration [4b/6]: Aligning reference clip for voice cloning...")
             wav_24k_raw = voice_profile_manager.convert_audio_to_wav(raw_audio_bytes, target_sample_rate=24000)
             aligned_24k_bytes, aligned_ref_text = voice_profile_manager.extract_aligned_reference_clip(
                 wav_24k_raw, words, transcript
@@ -260,27 +265,35 @@ async def calibrate_voice(
                 f"Hey {participant_name}! I've calibrated to your voice and tone. Let's chat!"
             )
             recommended_voice = profile_data.get("recommended_voice", "f5-tts")
+            logger.info(f"Calibration [5/6]: Synthesizing preview speech with voice '{recommended_voice}'...")
 
             # Create temporary 24k wav reference for preview synthesis if needed
             clean_name = "".join(c for c in participant_name if c.isalnum() or c in ("-", "_")).lower() or "user-default"
             temp_24k_path = voice_profile_manager.PROFILES_DIR / f"{clean_name}_ref_24k.wav"
             temp_24k_path.write_bytes(aligned_24k_bytes)
 
-            preview_bytes = voice_profile_manager.synthesize_preview_speech(
-                preview_text,
-                recommended_voice,
-                ref_audio_path=str(temp_24k_path),
-                ref_text=aligned_ref_text,
-            )
+            try:
+                preview_bytes = voice_profile_manager.synthesize_preview_speech(
+                    preview_text,
+                    recommended_voice,
+                    ref_audio_path=str(temp_24k_path),
+                    ref_text=aligned_ref_text,
+                )
+            except Exception as synth_err:
+                logger.warning(f"Preview synthesis encountered error ({synth_err}), proceeding with profile save")
+                preview_bytes = b""
 
             # 6. Save reference WAV and profile JSON
-            return voice_profile_manager.save_voice_profile(
+            logger.info(f"Calibration [6/6]: Saving calibrated voice profile for '{participant_name}'...")
+            saved = voice_profile_manager.save_voice_profile(
                 participant_name=participant_name,
                 profile_data=profile_data,
                 wav_bytes=wav_bytes,
                 preview_bytes=preview_bytes,
                 wav_24k_bytes=aligned_24k_bytes,
             )
+            logger.info(f"✅ Calibration complete for '{participant_name}'!")
+            return saved
 
         saved_profile = await asyncio.to_thread(_do_calibration)
         return saved_profile
